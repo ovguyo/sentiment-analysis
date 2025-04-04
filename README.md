@@ -19,3 +19,12 @@ This repo includes several changes from the original, such as:
   - Configs for customer sentiment classification
   - Evaluation code
 
+Modifications were applied on train.py and model.py scripts which are used in the jupyter notebook.
+
+## Usage
+
+This project is organized around a single Jupyter notebook (EDA and train.ipynb). Run the notebook first to get insights about the dataset and ensure it's ready for model training.
+Then preprocess the data, train, finetune and evaluate the model.
+
+
+
