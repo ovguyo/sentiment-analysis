@@ -114,21 +114,44 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 # poor man's data loader
 data_dir = os.path.join('data', dataset)
+
+# Global pointers to keep track of batch position
+train_ptr = 0
+val_ptr = 0
+
 def get_batch(split):
-    # We recreate np.memmap every batch to avoid a memory leak, as per
-    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
+    global train_ptr, val_ptr
+
     if split == 'train':
-        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+        data = pickle.load(open("data/sentiment/train_data.pkl", "rb"))
+        ptr = train_ptr
     else:
-        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-    y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-    if device_type == 'cuda':
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        data = pickle.load(open("data/sentiment/val_data.pkl", "rb"))
+        ptr = val_ptr
+
+    # Loop over if reaching the end
+    if ptr + batch_size > len(data):
+        ptr = 0
+
+    batch = data[ptr:ptr + batch_size]
+
+    if split == 'train':
+        train_ptr = ptr + batch_size
     else:
-        x, y = x.to(device), y.to(device)
+        val_ptr = ptr + batch_size
+
+    input_ids = []
+    labels = []
+
+    for tokens, label in batch:
+        tokens = tokens[:block_size]
+        padded = tokens + [0] * (block_size - len(tokens))
+        input_ids.append(padded)
+        labels.append(label)
+
+    x = torch.tensor(input_ids, dtype=torch.long).to(device)
+    y = torch.tensor(labels, dtype=torch.long).to(device)
+
     return x, y
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -155,7 +178,7 @@ if init_from == 'scratch':
         print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
+    model = GPT(gptconf, num_classes=num_classes)
 elif init_from == 'resume':
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
@@ -168,7 +191,7 @@ elif init_from == 'resume':
         model_args[k] = checkpoint_model_args[k]
     # create the model
     gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
+    model = GPT(gptconf, num_classes=num_classes)
     state_dict = checkpoint['model']
     # fix the keys of the state dictionary :(
     # honestly no idea how checkpoints sometimes get this prefix, have to debug more
