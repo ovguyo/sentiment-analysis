@@ -19,7 +19,7 @@ This repo includes several changes from the original, such as:
   - Configs for customer sentiment classification
   - Evaluation code
 
-Modifications were applied on train.py and model.py scripts which are used in the jupyter notebook.
+Modifications were applied on train.py, model.py scripts and configs which are used in the jupyter notebook.
 
 ## Usage
 
