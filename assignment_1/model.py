@@ -114,15 +114,22 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    init_from_scratch: bool = True
 
 class GPT(nn.Module):
 
-    def __init__(self, config, num_classes=None):
+    def __init__(self, config, num_classes=None, class_weights=None):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
         self.num_classes = num_classes
+
+        # class weights added for class imbalance problem
+        if class_weights is not None and config.init_from_scratch == True:
+            self.register_buffer("class_weights", class_weights)
+        else:
+            self.class_weights = class_weights
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
@@ -193,7 +200,7 @@ class GPT(nn.Module):
         else:
             pooled = x.mean(dim=1)
             logits = self.classifier(pooled)
-            loss = F.cross_entropy(logits, targets) if targets is not None else None
+            loss = F.cross_entropy(logits, targets, weight=self.class_weights) if targets is not None else None
 
         return logits, loss
 
@@ -209,7 +216,7 @@ class GPT(nn.Module):
                 block.attn.bias = block.attn.bias[:,:,:block_size,:block_size]
 
     @classmethod
-    def from_pretrained(cls, model_type, num_classes=None, override_args=None):
+    def from_pretrained(cls, model_type, num_classes=None, class_weights= None, override_args=None):
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         override_args = override_args or {} # default to empty dict
         # only dropout can be overridden see more notes below
@@ -228,13 +235,14 @@ class GPT(nn.Module):
         config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
         config_args['block_size'] = 1024 # always 1024 for GPT model checkpoints
         config_args['bias'] = True # always True for GPT model checkpoints
+        config_args['init_from_scratch'] = False
         # we can override the dropout rate, if desired
         if 'dropout' in override_args:
             print(f"overriding dropout rate to {override_args['dropout']}")
             config_args['dropout'] = override_args['dropout']
         # create a from-scratch initialized minGPT model
         config = GPTConfig(**config_args)
-        model = GPT(config, num_classes=num_classes)
+        model = GPT(config, num_classes=num_classes, class_weights=class_weights)
         sd = model.state_dict()
         sd_keys = [k for k in sd.keys()
                    if not k.endswith('.attn.bias') and not k.startswith('classifier')]
